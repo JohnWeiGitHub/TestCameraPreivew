@@ -29,6 +29,7 @@ import android.view.Menu;
 import android.view.SurfaceHolder;
 import android.view.SurfaceHolder.Callback;
 import android.view.SurfaceView;
+import android.view.TextureView;
 
 public class MainActivity extends Activity   implements Callback, PreviewCallback{
     private Camera mCamera = null;
@@ -223,6 +224,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         
         background_image.recycle();
         background_image = null;
+      
         
         Canvas canvas = mHolder.lockCanvas();
         if (canvas == null) {
