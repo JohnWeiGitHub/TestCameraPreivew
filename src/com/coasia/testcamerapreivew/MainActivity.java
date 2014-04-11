@@ -34,7 +34,7 @@ import android.view.TextureView;
 
 public class MainActivity extends Activity   implements Callback, PreviewCallback{
     private Camera mCamera = null;
-    private static final String TAG = "JOHN XXXXXXXXX";
+    private static final String TAG = "testcamerapreivew ";
     private static final int CAMERA_NUM = 0;
     private static final int MAX_FACES = 10;
     private SurfaceHolder mHolder;
@@ -45,7 +45,13 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     int h =480;
     private Parameters p;
     private FaceDetector.Face[] faces; 
-    private int face_count; 
+    private int face_count;
+    boolean debug =true;
+    void __log(String str){
+        if(debug)Log.i(TAG, str);    
+    }
+    boolean swFd=false;
+    boolean hwFd=false;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -55,7 +61,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             
         
         CameraInfo cameraInfo =new CameraInfo();
-        mCamera.getCameraInfo(CAMERA_NUM, cameraInfo);
+        Camera.getCameraInfo(CAMERA_NUM, cameraInfo);
         setContentView(R.layout.activity_main);
         mSurfaceView = (SurfaceView) this.findViewById(R.id.surfaceView_camera);
         mHolder = mSurfaceView.getHolder();
@@ -63,12 +69,12 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         p = mCamera.getParameters();
         List<Size> sizes = p.getSupportedPreviewSizes();
-        Log.i(TAG, "supported resolution============");
+        __log("supported resolution============");
         for(Size size :sizes) {
-            Log.i(TAG, size.width+"x"+size.height);         
+            __log(size.width+"x"+size.height);         
         }
-        w=p.getPreferredPreviewSizeForVideo().width;
-        h=p.getPreferredPreviewSizeForVideo().height;
+        //w=p.getPreferredPreviewSizeForVideo().width;
+        //h=p.getPreferredPreviewSizeForVideo().height;
         p.setPreviewSize(w, h);
        // if(p.getSupportedFocusModes().contains(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE))
         //p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE); will invalid due to preview not started yet 
@@ -79,7 +85,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         PixelFormat pf = new PixelFormat();
         PixelFormat.getPixelFormatInfo(p.getPreviewFormat(),pf);
         int bufSize = (w*h*pf.bitsPerPixel)/8;
-        Log.i(TAG, "buffer============");
+        __log("buffer============");
         //把buffer給preview callback備用
         
          byte []buffer1 = new byte[bufSize];
@@ -92,7 +98,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
        mCamera.addCallbackBuffer(buffer3 );
        mCamera.setPreviewCallbackWithBuffer(this);*/
        
-        Log.i(TAG, "setPreviewCallbackWithBuffer============");
+         __log("setPreviewCallbackWithBuffer============");
     }
 
     @Override
@@ -126,7 +132,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         // TODO Auto-generated method stub
         // If your preview can change or rotate, take care of those events here.
         // Make sure to stop the preview before resizing or reformatting it.
-        Log.i(TAG, "surfaceChanged " +width+"x"+height);
+        __log("surfaceChanged " +width+"x"+height);
         if (mHolder.getSurface() == null){
           // preview surface does not exist
           return;
@@ -151,7 +157,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
             mCamera.setParameters(p);
         } catch (Exception e){
-            Log.d(TAG, "Error starting camera preview: " + e.getMessage());
+            __log("Error starting camera preview: " + e.getMessage());
         }
 
     }
@@ -164,11 +170,11 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             mCamera.setPreviewCallback(this);
             mCamera.setPreviewDisplay(holder);
             mCamera.startPreview();
-            Log.i(TAG, "surfaceCreated started preview");
+            __log("surfaceCreated started preview");
             p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
             mCamera.setParameters(p);
         } catch (IOException e) {
-            Log.d(TAG, "Error setting camera preview: " + e.getMessage());
+            __log("Error setting camera preview: " + e.getMessage());
         }
 
     }
