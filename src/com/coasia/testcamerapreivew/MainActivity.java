@@ -1,18 +1,28 @@
 package com.coasia.testcamerapreivew;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ImageFormat;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.graphics.PointF;
+import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.YuvImage;
 import android.hardware.Camera;
 import android.hardware.Camera.CameraInfo;
 import android.hardware.Camera.Face;
@@ -22,17 +32,23 @@ import android.hardware.Camera.PreviewCallback;
 import android.hardware.Camera.Size;
 import android.media.FaceDetector;
 import android.os.Bundle;
+import android.os.Environment;
 import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.util.Log;
 import android.view.Menu;
+import android.view.OrientationEventListener;
 import android.view.SurfaceHolder;
 import android.view.SurfaceHolder.Callback;
 import android.view.SurfaceView;
 import android.view.TextureView;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.view.Window;
+import android.widget.Button;
 
-public class MainActivity extends Activity   implements Callback, PreviewCallback{
+public class MainActivity extends Activity   implements Callback, PreviewCallback, OnClickListener{
     private Camera mCamera = null;
     private static final String TAG = "testcamerapreivew ";
     private static final int CAMERA_NUM = 0;
@@ -52,17 +68,26 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     }
     boolean swFd=false;
     boolean hwFd=false;
+    int orientation =0;
+    byte []buffer1 = null; 
+    byte []buffer2 = null;
+    byte []buffer3 = null;
+    Button btnCapture;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         if(this.checkCameraHardware(this)) {
             mCamera =MainActivity.getCameraInstance();
         }
-            
-        
+      
+        mOrientationListener = new MyOrientationEventListener(this);
+
+        this.requestWindowFeature(Window.FEATURE_NO_TITLE);
         CameraInfo cameraInfo =new CameraInfo();
         Camera.getCameraInfo(CAMERA_NUM, cameraInfo);
         setContentView(R.layout.activity_main);
+        btnCapture = (Button) this.findViewById(R.id.button_capture);
+        btnCapture.setOnClickListener(this);
         mSurfaceView = (SurfaceView) this.findViewById(R.id.surfaceView_camera);
         mHolder = mSurfaceView.getHolder();
         mHolder.addCallback(this);
@@ -78,7 +103,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         p.setPreviewSize(w, h);
        // if(p.getSupportedFocusModes().contains(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE))
         //p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE); will invalid due to preview not started yet 
-        mCamera.setDisplayOrientation(cameraInfo.orientation);
+        orientation =cameraInfo.orientation;
         mCamera.setParameters(p);
         mCamera.setPreviewCallback(this);
         
@@ -88,17 +113,17 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         __log("buffer============");
         //把buffer給preview callback備用
         
-         byte []buffer1 = new byte[bufSize];
-        byte []buffer2 = new byte[bufSize];
-        byte []buffer3 = new byte[bufSize];
+       //  buffer1 = new byte[bufSize];
+         //buffer2 = new byte[bufSize];
+        buffer3 = new byte[bufSize];
          rgbBuffer = new byte[w*h*2];
          
         /*mCamera.addCallbackBuffer(buffer1 );
         mCamera.addCallbackBuffer(buffer2 );
        mCamera.addCallbackBuffer(buffer3 );
-       mCamera.setPreviewCallbackWithBuffer(this);*/
+       mCamera.setPreviewCallbackWithBuffer(this);
        
-         __log("setPreviewCallbackWithBuffer============");
+         __log("setPreviewCallbackWithBuffer============");*/
     }
 
     @Override
@@ -127,6 +152,17 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             return false;
         }
     }
+    
+     Bitmap getBitmapImageFromYUV(byte[] data, int width, int height) {
+        YuvImage yuvimage = new YuvImage(data, ImageFormat.NV21, width, height, null);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        yuvimage.compressToJpeg(new Rect(0, 0, width, height), 80, baos);
+        byte[] jdata = baos.toByteArray();
+        BitmapFactory.Options bitmapFatoryOptions = new BitmapFactory.Options();
+        bitmapFatoryOptions.inPreferredConfig = Bitmap.Config.RGB_565;
+        Bitmap bmp = BitmapFactory.decodeByteArray(jdata, 0, jdata.length, bitmapFatoryOptions);
+        return bmp;
+ }
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
         // TODO Auto-generated method stub
@@ -151,8 +187,13 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         // start preview with new settings
         try {
            //mCamera.setPreviewCallbackWithBuffer(this); 
-            mCamera.setPreviewCallback(this);
+        //    mCamera.setPreviewCallback(this);
+            mCamera.addCallbackBuffer(buffer3 );
+            mCamera.setPreviewCallbackWithBuffer(this);
+            
+              __log("setPreviewCallbackWithBuffer============");
             mCamera.setPreviewDisplay(holder);
+            mCamera.setDisplayOrientation(orientation);
             mCamera.startPreview();
             p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
             mCamera.setParameters(p);
@@ -167,8 +208,13 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         // TODO Auto-generated method stub
         try {
            // mCamera.setPreviewCallbackWithBuffer(this);
-            mCamera.setPreviewCallback(this);
+           // mCamera.setPreviewCallback(this);
+            mCamera.addCallbackBuffer(buffer3 );
+            mCamera.setPreviewCallbackWithBuffer(this);
+            
+              __log("setPreviewCallbackWithBuffer============");
             mCamera.setPreviewDisplay(holder);
+            mCamera.setDisplayOrientation(orientation);
             mCamera.startPreview();
             __log("surfaceCreated started preview");
             p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
@@ -189,8 +235,9 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     protected void onPause() {
         // TODO Auto-generated method stub
         super.onPause();
+        mOrientationListener.disable();
         mCamera.stopPreview();
-        //mCamera.setPreviewCallbackWithBuffer(null);
+        mCamera.setPreviewCallbackWithBuffer(null);
         mCamera.setPreviewCallback(null);
         mCamera.release();
         mCamera = null;
@@ -201,33 +248,38 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     protected void onResume() {
         // TODO Auto-generated method stub
         super.onResume();
+        mOrientationListener.enable();
         if(mCamera == null)
             mCamera = this.getCameraInstance();
         //mCamera.addCallbackBuffer(buffer1 );
         //mCamera.addCallbackBuffer(buffer2 );
         //mCamera.addCallbackBuffer(buffer3 );
 
-       mCamera.setPreviewCallback(this);
+       //mCamera.setPreviewCallback(this);
     }
 
-    int count;
+    
+    private MyOrientationEventListener mOrientationListener;
+    // The degrees of the device rotated clockwise from its natural orientation.
+    private int mLastRawOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
+
     @Override
     public void onPreviewFrame(byte[] data, Camera camera) {
         // TODO Auto-generated method stub
-        //Log.i(TAG, "onPreviewFrame");
+        //__log("onPreviewFrame enter");
         
-        toRGB565(data,w,h,rgbBuffer);
+        //toRGB565(data,w,h,rgbBuffer);
         
-        camera.addCallbackBuffer(data);
-        camera.setPreviewCallbackWithBuffer(this); 
+       // camera.addCallbackBuffer(data);
+       // camera.setPreviewCallbackWithBuffer(this); 
         
        // Log.i(TAG, "onPreviewFrame2");  
         
         
         
-        Bitmap background_image = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565);
-        ByteBuffer buf = ByteBuffer.wrap(rgbBuffer); // data is my array
-        background_image.copyPixelsFromBuffer(buf);
+        Bitmap background_image = getBitmapImageFromYUV(data, w, h);
+        if(mRotateMatrix!=null)
+            background_image = Bitmap.createBitmap(background_image, 0, 0, w, h, mRotateMatrix, true);
         
         FaceDetector face_detector = new FaceDetector( 
         background_image.getWidth(), background_image.getHeight(), 
@@ -236,8 +288,12 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         faces = new FaceDetector.Face[MAX_FACES]; 
         // The bitmap must be in 565 format (for now). 
         face_count = face_detector.findFaces(background_image, faces); 
-        if(face_count>0)    Log.d(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection", "Face Count: " + String.valueOf(face_count)); 
-        
+        if(face_count>0)   __log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection Count: " + String.valueOf(face_count)); 
+       
+        if(count_capture>0) {
+            this.storeImage(background_image);
+            count_capture=0;
+        }
         background_image.recycle();
         background_image = null;
       /*
@@ -251,12 +307,30 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         }
         */
         
-        //camera.addCallbackBuffer(data);
-       // camera.setPreviewCallbackWithBuffer(this);        
+
+        //camera.setPreviewCallbackWithBuffer(this);
+        camera.addCallbackBuffer(data);
         
-       
+       // __log("onPreviewFrame exit");
     }   
 
+private void storeImage(Bitmap image) {
+    File pictureFile = getOutputMediaFile();
+    if (pictureFile == null) {
+        Log.d(TAG,
+                "Error creating media file, check storage permissions: ");// e.getMessage());
+        return;
+    } 
+    try {
+        FileOutputStream fos = new FileOutputStream(pictureFile);
+        image.compress(Bitmap.CompressFormat.PNG, 90, fos);
+        fos.close();
+    } catch (FileNotFoundException e) {
+        Log.d(TAG, "File not found: " + e.getMessage());
+    } catch (IOException e) {
+        Log.d(TAG, "Error accessing file: " + e.getMessage());
+    }  
+}
     private void drawFaceRetangle(Canvas canvas, android.media.FaceDetector.Face[] faces, int face_count) {
         
         Paint tmp_paint = new Paint();
@@ -273,58 +347,70 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         // TODO Auto-generated method stub
      
     }
+    /** Create a File for saving an image or video */
+    private  File getOutputMediaFile(){
+        // To be safe, you should check that the SDCard is mounted
+        // using Environment.getExternalStorageState() before doing this. 
+        File mediaStorageDir = new File(Environment.getExternalStorageDirectory()
+                + "/Android/data/"
+                + getApplicationContext().getPackageName()
+                + "/Files"); 
 
-    private void toRGB565(byte[] yuvs, int width, int height, byte[] rgbs) {
-        //the end of the luminance data
-        final int lumEnd = width * height;
-        //points to the next luminance value pair
-        int lumPtr = 0;
-        //points to the next chromiance value pair
-        int chrPtr = lumEnd;
-        //points to the next byte output pair of RGB565 value
-        int outPtr = 0;
-        //the end of the current luminance scanline
-        int lineEnd = width;
+        // This location works best if you want the created images to be shared
+        // between applications and persist after your app has been uninstalled.
 
-        while (true) {
-
-            //skip back to the start of the chromiance values when necessary
-            if (lumPtr == lineEnd) {
-                if (lumPtr == lumEnd) break; //we've reached the end
-                //division here is a bit expensive, but's only done once per scanline
-                chrPtr = lumEnd + ((lumPtr  >> 1) / width) * width;
-                lineEnd += width;
+        // Create the storage directory if it does not exist
+        if (! mediaStorageDir.exists()){
+            if (! mediaStorageDir.mkdirs()){
+                return null;
             }
+        } 
+        // Create a media file name
+        String timeStamp = new SimpleDateFormat("ddMMyyyy_HHmm").format(new Date());
+        File mediaFile;
+            String mImageName="MI_"+ timeStamp +".jpg";
+            mediaFile = new File(mediaStorageDir.getPath() + File.separator + mImageName);  
+        return mediaFile;
+    } 
 
-            //read the luminance and chromiance values
-            final int Y1 = yuvs[lumPtr++] & 0xff; 
-            final int Y2 = yuvs[lumPtr++] & 0xff; 
-            final int Cr = (yuvs[chrPtr++] & 0xff) - 128; 
-            final int Cb = (yuvs[chrPtr++] & 0xff) - 128;
-            int R, G, B;
-
-            //generate first RGB components
-            B = Y1 + ((454 * Cb) >> 8);
-            if(B < 0) B = 0; else if(B > 255) B = 255; 
-            G = Y1 - ((88 * Cb + 183 * Cr) >> 8); 
-            if(G < 0) G = 0; else if(G > 255) G = 255; 
-            R = Y1 + ((359 * Cr) >> 8); 
-            if(R < 0) R = 0; else if(R > 255) R = 255; 
-            //NOTE: this assume little-endian encoding
-            rgbs[outPtr++]  = (byte) (((G & 0x3c) << 3) | (B >> 3));
-            rgbs[outPtr++]  = (byte) ((R & 0xf8) | (G >> 5));
-
-            //generate second RGB components
-            B = Y2 + ((454 * Cb) >> 8);
-            if(B < 0) B = 0; else if(B > 255) B = 255; 
-            G = Y2 - ((88 * Cb + 183 * Cr) >> 8); 
-            if(G < 0) G = 0; else if(G > 255) G = 255; 
-            R = Y2 + ((359 * Cr) >> 8); 
-            if(R < 0) R = 0; else if(R > 255) R = 255; 
-            //NOTE: this assume little-endian encoding
-            rgbs[outPtr++]  = (byte) (((G & 0x3c) << 3) | (B >> 3));
-            rgbs[outPtr++]  = (byte) ((R & 0xf8) | (G >> 5));
+    
+    private class MyOrientationEventListener
+    extends OrientationEventListener {
+        public MyOrientationEventListener(Context context) {
+            super(context);
         }
+
+    
+    @Override
+    
+    public void onOrientationChanged(int orientation) {
+        // We keep the last known orientation. So if the user first orient
+        // the camera then point the camera to floor or sky, we still have
+        // the correct orientation.
+        if (orientation == ORIENTATION_UNKNOWN) return;
+        mLastRawOrientation=0;
+        for (int i : sOrientDegrees) {
+            if (i - 45 <orientation && orientation <= i + 45) {
+                if(mLastRawOrientation == i) return;
+                else mLastRawOrientation = i;
+                break;
+            }
+        }
+        
+       // mLastRawOrientation = orientation;
+        if(mRotateMatrix == null) mRotateMatrix= new Matrix();
+        mRotateMatrix.setRotate(mLastRawOrientation==270 ?0 :mLastRawOrientation+90);
+        //mCurrentModule.onOrientationChanged(orientation);
+        }
+        
+    }
+    private Matrix mRotateMatrix = null;
+    private static final int[] sOrientDegrees = { 90, 180, 270 };
+    int count_capture;
+    @Override
+    public void onClick(View v) {
+        // TODO Auto-generated method stub
+        count_capture=1;
     }
     
 
