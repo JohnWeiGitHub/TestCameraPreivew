@@ -14,6 +14,7 @@ import android.graphics.Point;
 import android.graphics.PointF;
 import android.graphics.RectF;
 import android.hardware.Camera;
+import android.hardware.Camera.CameraInfo;
 import android.hardware.Camera.Face;
 import android.hardware.Camera.FaceDetectionListener;
 import android.hardware.Camera.Parameters;
@@ -34,7 +35,7 @@ import android.view.TextureView;
 public class MainActivity extends Activity   implements Callback, PreviewCallback{
     private Camera mCamera = null;
     private static final String TAG = "JOHN XXXXXXXXX";
-    private static final int CAMERA_NUM = 1;
+    private static final int CAMERA_NUM = 0;
     private static final int MAX_FACES = 10;
     private SurfaceHolder mHolder;
     private SurfaceView mSurfaceView;
@@ -42,7 +43,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
    
     int w =640;
     int h =480;
-    
+    private Parameters p;
     private FaceDetector.Face[] faces; 
     private int face_count; 
     @Override
@@ -53,20 +54,25 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         }
             
         
-        
+        CameraInfo cameraInfo =new CameraInfo();
+        mCamera.getCameraInfo(CAMERA_NUM, cameraInfo);
         setContentView(R.layout.activity_main);
         mSurfaceView = (SurfaceView) this.findViewById(R.id.surfaceView_camera);
         mHolder = mSurfaceView.getHolder();
         mHolder.addCallback(this);
         mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
-        Parameters p = mCamera.getParameters();
-        List<Size> sizes = p.getSupportedPictureSizes();
+        p = mCamera.getParameters();
+        List<Size> sizes = p.getSupportedPreviewSizes();
         Log.i(TAG, "supported resolution============");
         for(Size size :sizes) {
             Log.i(TAG, size.width+"x"+size.height);         
         }
-
+        w=p.getPreferredPreviewSizeForVideo().width;
+        h=p.getPreferredPreviewSizeForVideo().height;
         p.setPreviewSize(w, h);
+       // if(p.getSupportedFocusModes().contains(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE))
+        //p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE); will invalid due to preview not started yet 
+        mCamera.setDisplayOrientation(cameraInfo.orientation);
         mCamera.setParameters(p);
         mCamera.setPreviewCallback(this);
         
@@ -142,7 +148,8 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             mCamera.setPreviewCallback(this);
             mCamera.setPreviewDisplay(holder);
             mCamera.startPreview();
-
+            p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+            mCamera.setParameters(p);
         } catch (Exception e){
             Log.d(TAG, "Error starting camera preview: " + e.getMessage());
         }
@@ -158,6 +165,8 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             mCamera.setPreviewDisplay(holder);
             mCamera.startPreview();
             Log.i(TAG, "surfaceCreated started preview");
+            p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+            mCamera.setParameters(p);
         } catch (IOException e) {
             Log.d(TAG, "Error setting camera preview: " + e.getMessage());
         }
@@ -176,6 +185,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         super.onPause();
         mCamera.stopPreview();
         //mCamera.setPreviewCallbackWithBuffer(null);
+        mCamera.setPreviewCallback(null);
         mCamera.release();
         mCamera = null;
         
@@ -198,7 +208,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     @Override
     public void onPreviewFrame(byte[] data, Camera camera) {
         // TODO Auto-generated method stub
-        Log.i(TAG, "onPreviewFrame");
+        //Log.i(TAG, "onPreviewFrame");
         
         toRGB565(data,w,h,rgbBuffer);
         
@@ -220,11 +230,11 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         faces = new FaceDetector.Face[MAX_FACES]; 
         // The bitmap must be in 565 format (for now). 
         face_count = face_detector.findFaces(background_image, faces); 
-        Log.d(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection", "Face Count: " + String.valueOf(face_count)); 
+        if(face_count>0)    Log.d(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection", "Face Count: " + String.valueOf(face_count)); 
         
         background_image.recycle();
         background_image = null;
-      
+      /*
         
         Canvas canvas = mHolder.lockCanvas();
         if (canvas == null) {
@@ -233,7 +243,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             drawFaceRetangle(canvas,faces,face_count);
             mHolder.unlockCanvasAndPost(canvas);
         }
-        
+        */
         
         //camera.addCallbackBuffer(data);
        // camera.setPreviewCallbackWithBuffer(this);        
