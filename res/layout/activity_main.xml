@@ -22,6 +22,8 @@
         android:layout_alignRight="@+id/surfaceView_camera"
         android:text="Button" />
 
+
+
     <SurfaceView
         android:id="@+id/surfaceView_camera"
         android:layout_width="640dp"
@@ -30,6 +32,13 @@
         android:layout_below="@id/button_capture"
         android:layout_marginTop="16dp" />
 
-
+        <SurfaceView
+            android:id="@+id/face"
+            android:layout_width="640dp"
+            android:layout_height="480dp"
+            android:layout_alignBottom="@id/surfaceView_camera"
+            android:layout_alignLeft="@id/surfaceView_camera"
+            android:layout_alignRight="@id/surfaceView_camera"
+            android:layout_alignTop="@id/surfaceView_camera" />
 
   </RelativeLayout>

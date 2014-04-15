@@ -10,6 +10,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 
+
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -20,6 +21,7 @@ import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.graphics.PointF;
+import android.graphics.PorterDuff;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.YuvImage;
@@ -39,6 +41,7 @@ import android.content.pm.PackageManager;
 import android.util.Log;
 import android.view.Menu;
 import android.view.OrientationEventListener;
+import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceHolder.Callback;
 import android.view.SurfaceView;
@@ -53,12 +56,17 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     private static final String TAG = "testcamerapreivew ";
     private static final int CAMERA_NUM = 0;
     private static final int MAX_FACES = 10;
+    private static final float FACE_RECT_RATIO = 1.5f;
+    private static final int FACE_RECT_COLOR = Color.RED;
     private SurfaceHolder mHolder;
     private SurfaceView mSurfaceView;
     private byte[] rgbBuffer;
-   
+    private SurfaceView mFaceView;
+    float faceConfidence=0.5f;//default faceDetector return face with confidence > 0.4f which was set in framework
     int w =640;
     int h =480;
+    float xScale =1f;
+    float yScale =1f;
     private Parameters p;
     private FaceDetector.Face[] faces; 
     private int face_count;
@@ -73,6 +81,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     byte []buffer2 = null;
     byte []buffer3 = null;
     Button btnCapture;
+    CameraInfo cameraInfo = null;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -83,15 +92,22 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         mOrientationListener = new MyOrientationEventListener(this);
 
         this.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        CameraInfo cameraInfo =new CameraInfo();
+        cameraInfo =new CameraInfo();
         Camera.getCameraInfo(CAMERA_NUM, cameraInfo);
         setContentView(R.layout.activity_main);
         btnCapture = (Button) this.findViewById(R.id.button_capture);
         btnCapture.setOnClickListener(this);
         mSurfaceView = (SurfaceView) this.findViewById(R.id.surfaceView_camera);
+        
+        mFaceView =(SurfaceView)this.findViewById(R.id.face);        
+        mFaceView.getHolder().addCallback(this);
+        mFaceView.getHolder().setFormat(PixelFormat.TRANSPARENT);
+        mFaceView.setZOrderOnTop(true);
+        
+        
         mHolder = mSurfaceView.getHolder();
         mHolder.addCallback(this);
-        mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
+       // mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         p = mCamera.getParameters();
         List<Size> sizes = p.getSupportedPreviewSizes();
         __log("supported resolution============");
@@ -168,6 +184,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         // TODO Auto-generated method stub
         // If your preview can change or rotate, take care of those events here.
         // Make sure to stop the preview before resizing or reformatting it.
+        if(holder!=mHolder)return;
         __log("surfaceChanged " +width+"x"+height);
         if (mHolder.getSurface() == null){
           // preview surface does not exist
@@ -206,6 +223,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
         // TODO Auto-generated method stub
+        if(holder!=mHolder)return;
         try {
            // mCamera.setPreviewCallbackWithBuffer(this);
            // mCamera.setPreviewCallback(this);
@@ -261,7 +279,8 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     
     private MyOrientationEventListener mOrientationListener;
     // The degrees of the device rotated clockwise from its natural orientation.
-    private int mLastRawOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
+    private int mLastScreenOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
+    private int mSensorOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
 
     @Override
     public void onPreviewFrame(byte[] data, Camera camera) {
@@ -296,16 +315,20 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         }
         background_image.recycle();
         background_image = null;
-      /*
         
-        Canvas canvas = mHolder.lockCanvas();
-        if (canvas == null) {
-            Log.e(TAG, "Cannot draw onto the canvas as it's null");
-        } else {
-            drawFaceRetangle(canvas,faces,face_count);
-            mHolder.unlockCanvasAndPost(canvas);
-        }
-        */
+        
+            final Surface surface = mFaceView.getHolder().getSurface();
+            if(surface == null|| !surface.isValid())  Log.e(TAG, "surface is null or not valid");
+            Canvas canvas = surface.lockCanvas(null);
+            if (canvas == null) {
+                Log.e(TAG, "Cannot draw onto the canvas as it's null");
+            } else {
+                canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+                if(face_count>0) drawFaceRetangle(canvas,faces,face_count);
+                surface.unlockCanvasAndPost(canvas);
+            }
+        
+        
         
 
         //camera.setPreviewCallbackWithBuffer(this);
@@ -331,18 +354,62 @@ private void storeImage(Bitmap image) {
         Log.d(TAG, "Error accessing file: " + e.getMessage());
     }  
 }
+
     private void drawFaceRetangle(Canvas canvas, android.media.FaceDetector.Face[] faces, int face_count) {
+
+      
+        xScale =mFaceView.getWidth();       
+        yScale =mFaceView.getHeight();
+        
+        if(cameraInfo.orientation%180==90){
+            xScale /=h;
+            yScale /=w;
+        } else {
+            xScale /=w;
+            yScale /=h;
+        }
         
         Paint tmp_paint = new Paint();
-         PointF tmp_point = new PointF(); 
+         PointF tmp_point = new PointF();
+         RectF r= new RectF();
+         FaceDetector.Face face;
+         float eyeDis=0f;
+         //face.eyesDistance();
         for (int i = 0; i < face_count; i++) { 
-            FaceDetector.Face face = faces[i]; 
+             face = faces[i];              
+            if(faceConfidence>face.confidence())return;
+            eyeDis=face.eyesDistance()*FACE_RECT_RATIO;
+            tmp_paint.setColor(FACE_RECT_COLOR); 
+            tmp_paint.setAlpha(200); 
+            face.getMidPoint(tmp_point);
+            if(mSensorOrientation == 90) {
+            r.set( new RectF(xScale*(tmp_point.x-eyeDis),
+                    yScale*(tmp_point.y-eyeDis),
+                    xScale*(tmp_point.x+eyeDis),
+                    yScale*(tmp_point.y+eyeDis)));
+            } else if(mSensorOrientation == 180) {
+                r.set( new RectF((tmp_point.y-eyeDis)*xScale,
+                        mFaceView.getHeight()-(tmp_point.x+eyeDis)*yScale,
+                        (tmp_point.y+eyeDis)*xScale,
+                        mFaceView.getHeight()-(tmp_point.x-eyeDis)*yScale));
+            } else if(mSensorOrientation == 270) {
+                r.set( new RectF(mFaceView.getWidth()-(tmp_point.x+eyeDis)*xScale,
+                        mFaceView.getHeight()-(tmp_point.y+eyeDis)*yScale,
+                        mFaceView.getWidth()-(tmp_point.x-eyeDis)*xScale,
+                        mFaceView.getHeight()-(tmp_point.y-eyeDis)*yScale));
+            }  else {
+                r.set( new RectF(mFaceView.getWidth()-(tmp_point.y+eyeDis)*xScale,
+                        (tmp_point.x-eyeDis)*yScale,
+                        mFaceView.getWidth()-(tmp_point.y-eyeDis)*xScale,
+                        (tmp_point.x+eyeDis)*yScale
+                        ));
+            }
             
-            tmp_paint.setColor(Color.RED); 
-            tmp_paint.setAlpha(100); 
-            face.getMidPoint(tmp_point); 
-            canvas.drawCircle(tmp_point.x, tmp_point.y, face.eyesDistance(), 
-            tmp_paint); 
+           // canvas.drawCircle(tmp_point.x, tmp_point.y, face.eyesDistance(),  tmp_paint); 
+            
+           
+            canvas.drawRect(r, tmp_paint);
+           
             } 
         // TODO Auto-generated method stub
      
@@ -388,18 +455,19 @@ private void storeImage(Bitmap image) {
         // the camera then point the camera to floor or sky, we still have
         // the correct orientation.
         if (orientation == ORIENTATION_UNKNOWN) return;
-        mLastRawOrientation=0;
+        mLastScreenOrientation=0;
         for (int i : sOrientDegrees) {
             if (i - 45 <orientation && orientation <= i + 45) {
-                if(mLastRawOrientation == i) return;
-                else mLastRawOrientation = i;
+                if(mLastScreenOrientation == i) return;
+                else mLastScreenOrientation = i;
                 break;
             }
         }
         
        // mLastRawOrientation = orientation;
         if(mRotateMatrix == null) mRotateMatrix= new Matrix();
-        mRotateMatrix.setRotate(mLastRawOrientation==270 ?0 :mLastRawOrientation+90);
+        mSensorOrientation = mLastScreenOrientation+cameraInfo.orientation;
+        mRotateMatrix.setRotate(mSensorOrientation==360 ?0 :mSensorOrientation);
         //mCurrentModule.onOrientationChanged(orientation);
         }
         
