@@ -30,9 +30,12 @@ import android.hardware.Camera.CameraInfo;
 import android.hardware.Camera.Face;
 import android.hardware.Camera.FaceDetectionListener;
 import android.hardware.Camera.Parameters;
+import android.hardware.Camera.PictureCallback;
 import android.hardware.Camera.PreviewCallback;
 import android.hardware.Camera.Size;
 import android.media.FaceDetector;
+import android.media.MediaScannerConnection;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.app.Activity;
@@ -54,15 +57,16 @@ import android.widget.Button;
 public class MainActivity extends Activity   implements Callback, PreviewCallback, OnClickListener{
     private Camera mCamera = null;
     private static final String TAG = "testcamerapreivew ";
+    private static final String FOLDER_NAME = TAG;///storage/emulated/legacy/Pictures/$FOLDER_NAME/
     private static final int CAMERA_NUM = 0;
     private static final int MAX_FACES = 10;
     private static final float FACE_RECT_RATIO = 1.5f;
     private static final int FACE_RECT_COLOR = Color.RED;
     private SurfaceHolder mHolder;
     private SurfaceView mSurfaceView;
-    private byte[] rgbBuffer;
+    //private byte[] rgbBuffer;
     private SurfaceView mFaceView;
-    float faceConfidence=0.5f;//default faceDetector return face with confidence > 0.4f which was set in framework
+    float faceConfidence=0.4f;//default faceDetector return face with confidence > 0.4f which was set in framework
     int w =640;
     int h =480;
     float xScale =1f;
@@ -77,8 +81,8 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     boolean swFd=false;
     boolean hwFd=false;
     int orientation =0;
-    byte []buffer1 = null; 
-    byte []buffer2 = null;
+   // byte []buffer1 = null; 
+   // byte []buffer2 = null;
     byte []buffer3 = null;
     Button btnCapture;
     CameraInfo cameraInfo = null;
@@ -132,14 +136,9 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
        //  buffer1 = new byte[bufSize];
          //buffer2 = new byte[bufSize];
         buffer3 = new byte[bufSize];
-         rgbBuffer = new byte[w*h*2];
+        // rgbBuffer = new byte[w*h*2];
          
-        /*mCamera.addCallbackBuffer(buffer1 );
-        mCamera.addCallbackBuffer(buffer2 );
-       mCamera.addCallbackBuffer(buffer3 );
-       mCamera.setPreviewCallbackWithBuffer(this);
        
-         __log("setPreviewCallbackWithBuffer============");*/
     }
 
     @Override
@@ -307,7 +306,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         faces = new FaceDetector.Face[MAX_FACES]; 
         // The bitmap must be in 565 format (for now). 
         face_count = face_detector.findFaces(background_image, faces); 
-        if(face_count>0)   __log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection Count: " + String.valueOf(face_count)); 
+       // if(face_count>0)   __log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection Count: " + String.valueOf(face_count)); 
        
         if(count_capture>0) {
             this.storeImage(background_image);
@@ -380,7 +379,7 @@ private void storeImage(Bitmap image) {
             if(faceConfidence>face.confidence())return;
             eyeDis=face.eyesDistance()*FACE_RECT_RATIO;
             tmp_paint.setColor(FACE_RECT_COLOR); 
-            tmp_paint.setAlpha(200); 
+            tmp_paint.setAlpha(50); 
             face.getMidPoint(tmp_point);
             if(mSensorOrientation == 90) {
             r.set( new RectF(xScale*(tmp_point.x-eyeDis),
@@ -468,18 +467,95 @@ private void storeImage(Bitmap image) {
         if(mRotateMatrix == null) mRotateMatrix= new Matrix();
         mSensorOrientation = mLastScreenOrientation+cameraInfo.orientation;
         mRotateMatrix.setRotate(mSensorOrientation==360 ?0 :mSensorOrientation);
+        
+        p.setRotation(mSensorOrientation==360 ?0 :mSensorOrientation);
+        mCamera.setParameters(p);
         //mCurrentModule.onOrientationChanged(orientation);
         }
         
     }
     private Matrix mRotateMatrix = null;
     private static final int[] sOrientDegrees = { 90, 180, 270 };
-    int count_capture;
+    int count_capture=0;
     @Override
     public void onClick(View v) {
         // TODO Auto-generated method stub
-        count_capture=1;
+        //count_capture=1;
+        mCamera.takePicture(null, null, mPicture);
     }
     
+    
+    public static final int MEDIA_TYPE_IMAGE = 1;
+    public static final int MEDIA_TYPE_VIDEO = 2;
+
+    /** Create a file Uri for saving an image or video */
+    private static Uri getOutputMediaFileUri(int type){
+          return Uri.fromFile(getOutputMediaFile(type));
+    }
+
+    /** Create a File for saving an image or video */
+    private static File getOutputMediaFile(int type){
+        // To be safe, you should check that the SDCard is mounted
+        // using Environment.getExternalStorageState() before doing this.
+
+        File mediaStorageDir = new File(Environment.getExternalStoragePublicDirectory(
+                  Environment.DIRECTORY_PICTURES), FOLDER_NAME);
+        // This location works best if you want the created images to be shared
+        // between applications and persist after your app has been uninstalled.
+
+        // Create the storage directory if it does not exist
+        if (! mediaStorageDir.exists()){
+            if (! mediaStorageDir.mkdirs()){
+                Log.d("MyCameraApp", "failed to create directory");
+                return null;
+            }
+        }
+
+        // Create a media file name
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        File mediaFile;
+        if (type == MEDIA_TYPE_IMAGE){
+            mediaFile = new File(mediaStorageDir.getPath() + File.separator +
+            "IMG_"+ timeStamp + ".jpg");
+        } else if(type == MEDIA_TYPE_VIDEO) {
+            mediaFile = new File(mediaStorageDir.getPath() + File.separator +
+            "VID_"+ timeStamp + ".mp4");
+        } else {
+            return null;
+        }
+
+        return mediaFile;
+    }
+    private PictureCallback mPicture = new PictureCallback() {
+
+        @Override
+        public void onPictureTaken(byte[] data, Camera camera) {
+
+            File pictureFile = getOutputMediaFile(MEDIA_TYPE_IMAGE);
+            if (pictureFile == null){
+                Log.d(TAG, "Error creating media file, check storage permissions" );
+                return;
+            }
+            
+
+            try {
+                FileOutputStream fos = new FileOutputStream(pictureFile);
+                fos.write(data);
+                fos.close();
+                MediaScannerConnection.scanFile(MainActivity.this,
+                        new String[] {pictureFile.getAbsolutePath()}, null,
+                        new MediaScannerConnection.OnScanCompletedListener() {
+                    public void onScanCompleted(String path, Uri uri) {
+                        Log.i("ExternalStorage", "Scanned " + path + ":");
+                        Log.i("ExternalStorage", "-> uri=" + uri);
+                    }
+                });
+            } catch (FileNotFoundException e) {
+                Log.d(TAG, "File not found: " + e.getMessage());
+            } catch (IOException e) {
+                Log.d(TAG, "Error accessing file: " + e.getMessage());
+            }
+        }
+    };
 
 }
