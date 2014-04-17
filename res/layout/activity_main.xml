@@ -20,7 +20,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_alignRight="@+id/surfaceView_camera"
-        android:text="Button" />
+        android:text="Capture" />
 
 
 
@@ -40,5 +40,15 @@
             android:layout_alignLeft="@id/surfaceView_camera"
             android:layout_alignRight="@id/surfaceView_camera"
             android:layout_alignTop="@id/surfaceView_camera" />
+
+        <ToggleButton
+            android:id="@+id/toggleButton_connect"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignBottom="@+id/button_capture"
+            android:layout_marginRight="18dp"
+            android:layout_toLeftOf="@+id/button_capture"
+            android:textOff="Connect"
+            android:textOn="Discone" />
 
   </RelativeLayout>

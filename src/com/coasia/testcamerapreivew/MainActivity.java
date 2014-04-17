@@ -7,8 +7,12 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.UUID;
+
 
 
 import android.graphics.Bitmap;
@@ -38,23 +42,40 @@ import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.IBinder;
 import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothManager;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.util.Log;
 import android.view.Menu;
+import android.view.MenuItem;
 import android.view.OrientationEventListener;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceHolder.Callback;
 import android.view.SurfaceView;
-import android.view.TextureView;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.Window;
 import android.widget.Button;
+import android.widget.CompoundButton;
+import android.widget.SimpleExpandableListAdapter;
+import android.widget.CompoundButton.OnCheckedChangeListener;
+import android.widget.Toast;
+import android.widget.ToggleButton;
 
-public class MainActivity extends Activity   implements Callback, PreviewCallback, OnClickListener{
+public class MainActivity extends Activity   implements Callback, PreviewCallback, OnClickListener, OnCheckedChangeListener{
     private Camera mCamera = null;
     private static final String TAG = "testcamerapreivew ";
     private static final String FOLDER_NAME = TAG;///storage/emulated/legacy/Pictures/$FOLDER_NAME/
@@ -85,12 +106,29 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
    // byte []buffer2 = null;
     byte []buffer3 = null;
     Button btnCapture;
+    ToggleButton btnConnect;
     CameraInfo cameraInfo = null;
+    
+    
+    //BLE related field
+    private Handler mHandler = null;
+    private BluetoothAdapter mBluetoothAdapter = null;
+    private boolean mScanning;
+    private static final int REQUEST_ENABLE_BT = 1;
+    // Stops scanning after 10 seconds.
+    private static final long SCAN_PERIOD = 10000;
+    private ArrayList<BluetoothDevice> mLeDevices = new ArrayList<BluetoothDevice>();
+    private BluetoothDevice mHelloSensor;
+    private BluetoothLeService mBluetoothLeService;
+    private boolean mConnected = false;
+ 
+    //
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         if(this.checkCameraHardware(this)) {
-            mCamera =MainActivity.getCameraInstance();
+            if(mCamera == null)
+                mCamera =MainActivity.getCameraInstance();
         }
       
         mOrientationListener = new MyOrientationEventListener(this);
@@ -100,6 +138,8 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         Camera.getCameraInfo(CAMERA_NUM, cameraInfo);
         setContentView(R.layout.activity_main);
         btnCapture = (Button) this.findViewById(R.id.button_capture);
+        btnConnect = (ToggleButton) this.findViewById(R.id.toggleButton_connect);
+        btnConnect.setOnCheckedChangeListener( this);
         btnCapture.setOnClickListener(this);
         mSurfaceView = (SurfaceView) this.findViewById(R.id.surfaceView_camera);
         
@@ -111,6 +151,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         
         mHolder = mSurfaceView.getHolder();
         mHolder.addCallback(this);
+                
        // mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         p = mCamera.getParameters();
         List<Size> sizes = p.getSupportedPreviewSizes();
@@ -137,14 +178,64 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
          //buffer2 = new byte[bufSize];
         buffer3 = new byte[bufSize];
         // rgbBuffer = new byte[w*h*2];
-         
+        enableBLE();
        
     }
 
+    boolean enableBLE(){
+        mHandler = new Handler();
+
+        // Use this check to determine whether BLE is supported on the device.  Then you can
+        // selectively disable BLE-related features.
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
+            Toast.makeText(this, R.string.ble_not_supported, Toast.LENGTH_SHORT).show();
+            //finish();
+        }
+
+        // Initializes a Bluetooth adapter.  For API level 18 and above, get a reference to
+        // BluetoothAdapter through BluetoothManager.
+        final BluetoothManager bluetoothManager =
+                (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        mBluetoothAdapter = bluetoothManager.getAdapter();
+
+        // Checks if Bluetooth is supported on the device.
+        if (mBluetoothAdapter == null) {
+            Toast.makeText(this, R.string.error_bluetooth_not_supported, Toast.LENGTH_SHORT).show();
+           // finish();
+            return false;
+        }
+        return true;
+    }
+    
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         // Inflate the menu; this adds items to the action bar if it is present.
         getMenuInflater().inflate(R.menu.main, menu);
+        if (!mScanning) {
+            menu.findItem(R.id.menu_stop).setVisible(false);
+            menu.findItem(R.id.menu_scan).setVisible(true);
+            //menu.findItem(R.id.menu_refresh).setActionView(null);
+        } else {
+            menu.findItem(R.id.menu_stop).setVisible(true);
+            menu.findItem(R.id.menu_scan).setVisible(false);
+            //menu.findItem(R.id.menu_refresh).setActionView(
+                   // R.layout.actionbar_indeterminate_progress);
+        }
+        return true;
+    }
+    
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.menu_scan:
+                mLeDevices.clear();
+                mHelloSensor=null;
+                scanLeDevice(true);               
+                break;
+            case R.id.menu_stop:
+                scanLeDevice(false);
+                break;
+        }
         return true;
     }
     /** A safe way to get an instance of the Camera object. */
@@ -199,6 +290,10 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
 
         // set preview size and make any resize, rotate or
         // reformatting changes here
+        startPreview(holder);
+
+    }
+    void startPreview(SurfaceHolder holder) {
 
         // start preview with new settings
         try {
@@ -216,29 +311,13 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         } catch (Exception e){
             __log("Error starting camera preview: " + e.getMessage());
         }
-
     }
 
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
         // TODO Auto-generated method stub
         if(holder!=mHolder)return;
-        try {
-           // mCamera.setPreviewCallbackWithBuffer(this);
-           // mCamera.setPreviewCallback(this);
-            mCamera.addCallbackBuffer(buffer3 );
-            mCamera.setPreviewCallbackWithBuffer(this);
-            
-              __log("setPreviewCallbackWithBuffer============");
-            mCamera.setPreviewDisplay(holder);
-            mCamera.setDisplayOrientation(orientation);
-            mCamera.startPreview();
-            __log("surfaceCreated started preview");
-            p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
-            mCamera.setParameters(p);
-        } catch (IOException e) {
-            __log("Error setting camera preview: " + e.getMessage());
-        }
+        startPreview(holder);
 
     }
 
@@ -248,6 +327,52 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
 
     }
 
+   
+
+    private void scanLeDevice(final boolean enable) {
+        if (enable) {
+            // Stops scanning after a pre-defined scan period.
+            mHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    mScanning = false;
+                    mBluetoothAdapter.stopLeScan(mLeScanCallback);
+                    invalidateOptionsMenu();
+                }
+            }, SCAN_PERIOD);
+
+            mScanning = true;
+            mBluetoothAdapter.startLeScan(mLeScanCallback);
+        } else {
+            mScanning = false;
+            mBluetoothAdapter.stopLeScan(mLeScanCallback);
+        }
+        invalidateOptionsMenu();
+    }
+    
+    // Device scan callback.
+    private BluetoothAdapter.LeScanCallback mLeScanCallback =
+            new BluetoothAdapter.LeScanCallback() {
+
+        @Override
+        public void onLeScan(final BluetoothDevice device, int rssi, byte[] scanRecord) {
+          //  runOnUiThread(new Runnable() {
+       //        @Override
+            //    public void run() {
+                    if(!mLeDevices.contains(device)) {
+                        mLeDevices.add(device);
+                        __log("device name="+device.getName());                       
+                    }
+                    if(device.getName().equals("Hello Sensor")) {
+                        // device.fetchUuidsWithSdp();
+                         mHelloSensor = device;
+                         //__log("device uuids="+device.getUuids());
+                     }
+               // }
+           // });
+        }
+    };
+    
     @Override
     protected void onPause() {
         // TODO Auto-generated method stub
@@ -259,22 +384,57 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         mCamera.release();
         mCamera = null;
         
+        scanLeDevice(false);
+        mLeDevices.clear();
+        mHelloSensor =null;
+        
+        //unregisterReceiver(mGattUpdateReceiver);
+        
     }
-
+    
     @Override
     protected void onResume() {
         // TODO Auto-generated method stub
         super.onResume();
         mOrientationListener.enable();
-        if(mCamera == null)
+        if(mCamera == null) {
             mCamera = this.getCameraInstance();
+            __log("onResume = null");
+            startPreview(mHolder);
+        }
         //mCamera.addCallbackBuffer(buffer1 );
-        //mCamera.addCallbackBuffer(buffer2 );
+        //mCamera.addCallbackBuffer(buffer2 ); 
         //mCamera.addCallbackBuffer(buffer3 );
 
        //mCamera.setPreviewCallback(this);
-    }
+        
+        
+        // Ensures Bluetooth is enabled on the device.  If Bluetooth is not currently enabled,
+        // fire an intent to display a dialog asking the user to grant permission to enable it.
+        if (!mBluetoothAdapter.isEnabled()) {
+            if (!mBluetoothAdapter.isEnabled()) {
+                Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+                startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+            }
+        }
 
+        // Initializes list mLeDevices.
+        mLeDevices.clear();
+        mHelloSensor =null;
+        scanLeDevice(true);
+        
+      //  registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
+    }
+    
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        // User chose not to enable Bluetooth.
+        if (requestCode == REQUEST_ENABLE_BT && resultCode == Activity.RESULT_CANCELED) {
+            Log.e(TAG,">>>>>>>>BLE not enabled and something will malfunction<<<<<<<<<<");
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
     
     private MyOrientationEventListener mOrientationListener;
     // The degrees of the device rotated clockwise from its natural orientation.
@@ -476,12 +636,12 @@ private void storeImage(Bitmap image) {
     }
     private Matrix mRotateMatrix = null;
     private static final int[] sOrientDegrees = { 90, 180, 270 };
-    int count_capture=0;
+    int count_capture=0;//for save preview frame as a bmp
     @Override
     public void onClick(View v) {
         // TODO Auto-generated method stub
         //count_capture=1;
-        mCamera.takePicture(null, null, mPicture);
+        __takePicture();
     }
     
     
@@ -531,6 +691,7 @@ private void storeImage(Bitmap image) {
         @Override
         public void onPictureTaken(byte[] data, Camera camera) {
 
+            capture_in_progress = false;
             File pictureFile = getOutputMediaFile(MEDIA_TYPE_IMAGE);
             if (pictureFile == null){
                 Log.d(TAG, "Error creating media file, check storage permissions" );
@@ -557,5 +718,112 @@ private void storeImage(Bitmap image) {
             }
         }
     };
+    
+    private final ServiceConnection mServiceConnection = new ServiceConnection() {
+
+        @Override
+        public void onServiceConnected(ComponentName componentName, IBinder service) {
+            mBluetoothLeService = ((BluetoothLeService.LocalBinder) service).getService();
+            if (!mBluetoothLeService.initialize()) {
+                Log.e(TAG, "Unable to initialize Bluetooth");
+                finish();
+            }
+            // Automatically connects to the device upon successful start-up initialization.
+            registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
+            if(mHelloSensor!= null)
+                mBluetoothLeService.connect(mHelloSensor.getAddress());
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName componentName) {
+            mBluetoothLeService = null;
+            unregisterReceiver(mGattUpdateReceiver);
+        }
+    };
+ // Handles various events fired by the Service.
+    // ACTION_GATT_CONNECTED: connected to a GATT server.
+    // ACTION_GATT_DISCONNECTED: disconnected from a GATT server.
+    // ACTION_GATT_SERVICES_DISCOVERED: discovered GATT services.
+    // ACTION_DATA_AVAILABLE: received data from the device.  This can be a result of read
+    //                        or notification operations.
+    private final BroadcastReceiver mGattUpdateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            final String action = intent.getAction();
+            if (BluetoothLeService.ACTION_GATT_CONNECTED.equals(action)) {
+                mConnected = true;
+             //  updateConnectionState(R.string.connected);
+             //   invalidateOptionsMenu();
+            } else if (BluetoothLeService.ACTION_GATT_DISCONNECTED.equals(action)) {
+               mConnected = false;
+            //    updateConnectionState(R.string.disconnected);
+             //   invalidateOptionsMenu();
+           //     clearUI();
+            } else if (BluetoothLeService.ACTION_GATT_SERVICES_DISCOVERED.equals(action)) {
+                if(mBluetoothLeService != null)
+                    enableNotify(mBluetoothLeService.getSupportedGattService(UUID.fromString(SampleGattAttributes.UUID_SERVICE_HELLO)),
+                        SampleGattAttributes.UUID_CHARACTERISTIC_HELLO_NOTIFY);
+                
+            } else if (BluetoothLeService.ACTION_DATA_AVAILABLE.equals(action)) {
+            //    displayData(intent.getStringExtra(BluetoothLeService.EXTRA_DATA));
+                __takePicture ();
+            }
+        }
+    };
+    
+    void __takePicture (){
+        if(!capture_in_progress) {
+            mCamera.takePicture(null, null, mPicture);
+            capture_in_progress = true;
+        } else {
+            Toast.makeText(MainActivity.this, "capture in progress", Toast.LENGTH_SHORT).show();
+            __log("previous capture in progress");
+        }
+    }
+    boolean capture_in_progress =false;
+    @Override
+    public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+        // TODO Auto-generated method stub
+        if(isChecked) {
+            Intent gattServiceIntent = new Intent(this, BluetoothLeService.class);
+            bindService(gattServiceIntent, mServiceConnection, BIND_AUTO_CREATE);
+        } else {
+            unbindService(mServiceConnection);
+            mBluetoothLeService = null;
+        }
+        
+    }
+    private static IntentFilter makeGattUpdateIntentFilter() {
+        final IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(BluetoothLeService.ACTION_GATT_CONNECTED);
+        intentFilter.addAction(BluetoothLeService.ACTION_GATT_DISCONNECTED);
+        intentFilter.addAction(BluetoothLeService.ACTION_GATT_SERVICES_DISCOVERED);
+        intentFilter.addAction(BluetoothLeService.ACTION_DATA_AVAILABLE);
+        return intentFilter;
+    }
+    
+    BluetoothGattService gattServiceHello = null;
+    BluetoothGattCharacteristic gattCharNotify = null;
+    //private ArrayList<ArrayList<BluetoothGattCharacteristic>> mGattCharacteristics = null;
+    //        new ArrayList<ArrayList<BluetoothGattCharacteristic>>();
+    private boolean enableNotify(BluetoothGattService gattService, String uuid_char) {
+        if (gattService == null) return false;
+        BluetoothGattCharacteristic gattCharNotify= gattService.getCharacteristic(UUID.fromString(uuid_char));
+        if(gattCharNotify == null)return false;
+        mBluetoothLeService.setCharacteristicNotification(gattCharNotify, true);
+        return true;
+      /*  String uuid = null;
+        String unknownServiceString = getResources().getString(R.string.unknown_service);
+        String unknownCharaString = getResources().getString(R.string.unknown_characteristic);
+        
+      //  ArrayList<HashMap<String, String>> gattServiceData = new ArrayList<HashMap<String, String>>();
+       // ArrayList<ArrayList<HashMap<String, String>>> gattCharacteristicData
+         //       = new ArrayList<ArrayList<HashMap<String, String>>>();
+        //mGattCharacteristics = new ArrayList<ArrayList<BluetoothGattCharacteristic>>();*/
+
+        // Loops through available GATT Services.
+        
+       
+    }
 
 }
