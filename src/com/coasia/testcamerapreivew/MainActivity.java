@@ -117,7 +117,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     private static final int REQUEST_ENABLE_BT = 1;
     // Stops scanning after 10 seconds.
     private static final long SCAN_PERIOD = 10000;
-    private ArrayList<BluetoothDevice> mLeDevices = new ArrayList<BluetoothDevice>();
+   // private ArrayList<BluetoothDevice> mLeDevices = new ArrayList<BluetoothDevice>();
     private BluetoothDevice mHelloSensor;
     private BluetoothLeService mBluetoothLeService;
     private boolean mConnected = false;
@@ -178,12 +178,15 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
          //buffer2 = new byte[bufSize];
         buffer3 = new byte[bufSize];
         // rgbBuffer = new byte[w*h*2];
+        
+        
+        mHandler = new Handler();
         enableBLE();
        
     }
 
     boolean enableBLE(){
-        mHandler = new Handler();
+      
 
         // Use this check to determine whether BLE is supported on the device.  Then you can
         // selectively disable BLE-related features.
@@ -228,8 +231,9 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.menu_scan:
-                mLeDevices.clear();
+               // mLeDevices.clear();
                 mHelloSensor=null;
+                __enableConnect(false);
                 scanLeDevice(true);               
                 break;
             case R.id.menu_stop:
@@ -356,20 +360,15 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
 
         @Override
         public void onLeScan(final BluetoothDevice device, int rssi, byte[] scanRecord) {
-          //  runOnUiThread(new Runnable() {
-       //        @Override
-            //    public void run() {
-                    if(!mLeDevices.contains(device)) {
-                        mLeDevices.add(device);
-                        __log("device name="+device.getName());                       
-                    }
-                    if(device.getName().equals("Hello Sensor")) {
-                        // device.fetchUuidsWithSdp();
-                         mHelloSensor = device;
-                         //__log("device uuids="+device.getUuids());
-                     }
-               // }
-           // });
+            __log("device name=" + device.getName());
+            if (device.getName().equals("Hello Sensor")) {
+                // device.fetchUuidsWithSdp();
+                mHelloSensor = device;
+             
+                        __enableConnect(true);
+                
+
+            }
         }
     };
     
@@ -385,10 +384,10 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         mCamera = null;
         
         scanLeDevice(false);
-        mLeDevices.clear();
+       // mLeDevices.clear();
         mHelloSensor =null;
         
-        //unregisterReceiver(mGattUpdateReceiver);
+        unregisterReceiver(mGattUpdateReceiver);
         
     }
     
@@ -419,11 +418,12 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         }
 
         // Initializes list mLeDevices.
-        mLeDevices.clear();
+      //  mLeDevices.clear();
         mHelloSensor =null;
+        __enableConnect(false);
         scanLeDevice(true);
         
-      //  registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
+        registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
     }
     
     @Override
@@ -729,15 +729,16 @@ private void storeImage(Bitmap image) {
                 finish();
             }
             // Automatically connects to the device upon successful start-up initialization.
-            registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
-            if(mHelloSensor!= null)
+            //registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
+            if(mHelloSensor!= null) {
                 mBluetoothLeService.connect(mHelloSensor.getAddress());
+                __enableConnect(false);
+            }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName componentName) {
-            mBluetoothLeService = null;
-            unregisterReceiver(mGattUpdateReceiver);
+            mBluetoothLeService = null;            
         }
     };
  // Handles various events fired by the Service.
@@ -752,10 +753,14 @@ private void storeImage(Bitmap image) {
             final String action = intent.getAction();
             if (BluetoothLeService.ACTION_GATT_CONNECTED.equals(action)) {
                 mConnected = true;
+                __enableConnect(true);
              //  updateConnectionState(R.string.connected);
              //   invalidateOptionsMenu();
             } else if (BluetoothLeService.ACTION_GATT_DISCONNECTED.equals(action)) {
                mConnected = false;
+              
+               __checkConnect(false);
+                __enableConnect(false);//user need to rescan
             //    updateConnectionState(R.string.disconnected);
              //   invalidateOptionsMenu();
            //     clearUI();
@@ -766,7 +771,7 @@ private void storeImage(Bitmap image) {
                 
             } else if (BluetoothLeService.ACTION_DATA_AVAILABLE.equals(action)) {
             //    displayData(intent.getStringExtra(BluetoothLeService.EXTRA_DATA));
-                __takePicture ();
+                __takePicture ();                
             }
         }
     };
@@ -786,13 +791,32 @@ private void storeImage(Bitmap image) {
         // TODO Auto-generated method stub
         if(isChecked) {
             Intent gattServiceIntent = new Intent(this, BluetoothLeService.class);
-            bindService(gattServiceIntent, mServiceConnection, BIND_AUTO_CREATE);
+            if(mBluetoothLeService == null)
+                bindService(gattServiceIntent, mServiceConnection, BIND_AUTO_CREATE);
+            else {
+                if(mHelloSensor!= null)
+                    mBluetoothLeService.connect(mHelloSensor.getAddress());
+            }
+                
         } else {
-            unbindService(mServiceConnection);
-            mBluetoothLeService = null;
+            if(mBluetoothLeService!=null)
+                mBluetoothLeService.disconnect();
+            __enableConnect(false);
+            //unbindService(mServiceConnection);
+            //mBluetoothLeService = null;            
         }
         
     }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if(mBluetoothLeService !=null)
+            unbindService(mServiceConnection);
+        mBluetoothLeService = null;
+           
+    }
+    
     private static IntentFilter makeGattUpdateIntentFilter() {
         final IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction(BluetoothLeService.ACTION_GATT_CONNECTED);
@@ -802,8 +826,7 @@ private void storeImage(Bitmap image) {
         return intentFilter;
     }
     
-    BluetoothGattService gattServiceHello = null;
-    BluetoothGattCharacteristic gattCharNotify = null;
+  
     //private ArrayList<ArrayList<BluetoothGattCharacteristic>> mGattCharacteristics = null;
     //        new ArrayList<ArrayList<BluetoothGattCharacteristic>>();
     private boolean enableNotify(BluetoothGattService gattService, String uuid_char) {
@@ -825,5 +848,25 @@ private void storeImage(Bitmap image) {
         
        
     }
+    void __enableConnect(final boolean enabled) {
+        
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if(btnConnect!=null) btnConnect.setEnabled(enabled);
+            }
+        });
+        
+    }
+    void __checkConnect(final boolean checked) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if(btnConnect!=null) btnConnect.setChecked(checked);
+            }
+        });
+       
+    }
+   
 
 }
