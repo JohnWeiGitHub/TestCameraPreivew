@@ -40,7 +40,7 @@ import java.util.UUID;
  * given Bluetooth LE device.
  */
 public class BluetoothLeService extends Service {
-    private final static String TAG = BluetoothLeService.class.getSimpleName();
+    private final static String TAG = "testcamerapreivew ";//BluetoothLeService.class.getSimpleName();
 
     private BluetoothManager mBluetoothManager;
     private BluetoothAdapter mBluetoothAdapter;
@@ -214,7 +214,7 @@ public class BluetoothLeService extends Service {
             Log.w(TAG, "BluetoothAdapter not initialized or unspecified address.");
             return false;
         }
-/*reset connect for sure
+/*reset connect for sure*/
         // Previously connected device.  Try to reconnect.
         if (mBluetoothDeviceAddress != null && address.equals(mBluetoothDeviceAddress)
                 && mBluetoothGatt != null) {
@@ -226,7 +226,7 @@ public class BluetoothLeService extends Service {
                 return false;
             }
         }
-*/
+
         final BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
         if (device == null) {
             Log.w(TAG, "Device not found.  Unable to connect.");
@@ -282,6 +282,15 @@ public class BluetoothLeService extends Service {
         }
         mBluetoothGatt.readCharacteristic(characteristic);
     }
+    
+    void __delay(long miniSec) {
+        try {
+            Thread.sleep(miniSec);//delay
+        } catch (InterruptedException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+    }
 
     /**
      * Enables or disables notification on a give characteristic.
@@ -296,14 +305,42 @@ public class BluetoothLeService extends Service {
             return;
         }
         mBluetoothGatt.setCharacteristicNotification(characteristic, enabled);
-
+        Log.w("testcamerapreivew", "  setCharacteristicNotification enable notify");
         // This is specific to Heart Rate Measurement.
         //if (UUID_HEART_RATE_MEASUREMENT.equals(characteristic.getUuid())) {
             BluetoothGattDescriptor descriptor = characteristic.getDescriptor(
                     UUID.fromString(SampleGattAttributes.CLIENT_CHARACTERISTIC_CONFIG));
             if(descriptor != null) {
+                
+               // //for debug
+                if(!mBluetoothGatt.readDescriptor(descriptor))Log.e("testcamerapreivew", " fail to readDescriptor ");
+                    
+                __delay(800);
+                final byte[] data = descriptor.getValue(); 
+                if(data !=null) {
+                final StringBuilder stringBuilder = new StringBuilder(data.length);
+                
+                for(byte byteChar : data)
+                    stringBuilder.append(String.format("%02X ", byteChar));                
+                Log.e("testcamerapreivew", "  before enable notify value =" +new String(data) + "\n" + stringBuilder.toString());
+                } else Log.e("testcamerapreivew", " fail to readDescriptor data = null");
+                //
+                
                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                 mBluetoothGatt.writeDescriptor(descriptor);
+                Log.w("testcamerapreivew", "  BluetoothGattDescriptor enable notify");
+
+                //for debug
+                if(!mBluetoothGatt.readDescriptor(descriptor))Log.e("testcamerapreivew", " fail to readDescriptor2 ");
+                __delay(800);
+                final byte[] data2= descriptor.getValue();
+                if(data2 !=null) {
+                final StringBuilder stringBuilder2 = new StringBuilder(data2.length);
+                for(byte byteChar : data2)
+                    stringBuilder2.append(String.format("%02X ", byteChar));
+                Log.e("testcamerapreivew", "  after enable notify value =" +new String(data2) + "\n" + stringBuilder2.toString());
+                } else Log.e("testcamerapreivew", " fail to readDescriptor data2 = null");
+                //
             }
         //}
     }

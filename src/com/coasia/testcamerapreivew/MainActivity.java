@@ -37,9 +37,12 @@ import android.hardware.Camera.Parameters;
 import android.hardware.Camera.PictureCallback;
 import android.hardware.Camera.PreviewCallback;
 import android.hardware.Camera.Size;
+import android.media.AudioManager;
 import android.media.FaceDetector;
+import android.media.MediaPlayer;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -363,9 +366,9 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             __log("device name=" + device.getName());
             if (device.getName().equals("Hello Sensor")) {
                 // device.fetchUuidsWithSdp();
-                mHelloSensor = device;
-             
+                mHelloSensor = device;             
                         __enableConnect(true);
+                        scanLeDevice(false);
                 
 
             }
@@ -440,58 +443,94 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     // The degrees of the device rotated clockwise from its natural orientation.
     private int mLastScreenOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
     private int mSensorOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
+    
+    boolean faceDetectInProgress = false;
 
+    class FaceDectecorAsyncTask extends AsyncTask<String, Integer, Integer>{
+
+        @Override
+        protected Integer doInBackground(String... param) {
+            
+            
+            if(mRotateMatrix!=null)
+                background_image = Bitmap.createBitmap(background_image, 0, 0, w, h, mRotateMatrix, true);
+            
+            FaceDetector face_detector = new FaceDetector( 
+            background_image.getWidth(), background_image.getHeight(), 
+            MAX_FACES); 
+
+            faces = new FaceDetector.Face[MAX_FACES]; 
+            // The bitmap must be in 565 format (for now). 
+            face_count = face_detector.findFaces(background_image, faces); 
+           // if(face_count>0)   __log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection Count: " + String.valueOf(face_count)); 
+           
+            if(count_capture>0) {
+                MainActivity.this.storeImage(background_image);
+                count_capture=0;
+            }
+            background_image.recycle();
+            background_image = null;
+            
+            
+                final Surface surface = mFaceView.getHolder().getSurface();
+                if(surface == null|| !surface.isValid())  Log.e(TAG, "surface is null or not valid");
+                Canvas canvas = surface.lockCanvas(null);
+                if (canvas == null) {
+                    Log.e(TAG, "Cannot draw onto the canvas as it's null");
+                } else {
+                    canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+                    if(face_count>0) drawFaceRetangle(canvas,faces,face_count);
+                    surface.unlockCanvasAndPost(canvas);
+                }
+            
+                try {
+                    Thread.sleep(333);//30 fps
+                } catch (InterruptedException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
+          
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(Integer result) {
+            faceDetectInProgress = false;
+            super.onPostExecute(result);
+            
+        }
+
+        @Override
+        protected void onProgressUpdate(Integer... values) {
+            super.onProgressUpdate(values);
+        }
+
+        @Override
+        protected void onPreExecute() {
+            faceDetectInProgress = true;
+            super.onPreExecute();
+        }
+
+    }
+    
+    
+    Bitmap background_image;
     @Override
     public void onPreviewFrame(byte[] data, Camera camera) {
         // TODO Auto-generated method stub
         //__log("onPreviewFrame enter");
         
-        //toRGB565(data,w,h,rgbBuffer);
         
-       // camera.addCallbackBuffer(data);
-       // camera.setPreviewCallbackWithBuffer(this); 
+        if(faceDetectInProgress == false) {
         
-       // Log.i(TAG, "onPreviewFrame2");  
-        
-        
-        
-        Bitmap background_image = getBitmapImageFromYUV(data, w, h);
-        if(mRotateMatrix!=null)
-            background_image = Bitmap.createBitmap(background_image, 0, 0, w, h, mRotateMatrix, true);
-        
-        FaceDetector face_detector = new FaceDetector( 
-        background_image.getWidth(), background_image.getHeight(), 
-        MAX_FACES); 
-
-        faces = new FaceDetector.Face[MAX_FACES]; 
-        // The bitmap must be in 565 format (for now). 
-        face_count = face_detector.findFaces(background_image, faces); 
-       // if(face_count>0)   __log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection Count: " + String.valueOf(face_count)); 
-       
-        if(count_capture>0) {
-            this.storeImage(background_image);
-            count_capture=0;
+            background_image = getBitmapImageFromYUV(data, w, h);
+            new FaceDectecorAsyncTask().execute( new String());
         }
-        background_image.recycle();
-        background_image = null;
-        
-        
-            final Surface surface = mFaceView.getHolder().getSurface();
-            if(surface == null|| !surface.isValid())  Log.e(TAG, "surface is null or not valid");
-            Canvas canvas = surface.lockCanvas(null);
-            if (canvas == null) {
-                Log.e(TAG, "Cannot draw onto the canvas as it's null");
-            } else {
-                canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-                if(face_count>0) drawFaceRetangle(canvas,faces,face_count);
-                surface.unlockCanvasAndPost(canvas);
-            }
-        
         
         
 
-        //camera.setPreviewCallbackWithBuffer(this);
-        camera.addCallbackBuffer(data);
+        
+        //camera.addCallbackBuffer(data);
         
        // __log("onPreviewFrame exit");
     }   
@@ -629,7 +668,7 @@ private void storeImage(Bitmap image) {
         mRotateMatrix.setRotate(mSensorOrientation==360 ?0 :mSensorOrientation);
         
         p.setRotation(mSensorOrientation==360 ?0 :mSensorOrientation);
-        mCamera.setParameters(p);
+        //mCamera.setParameters(p);
         //mCurrentModule.onOrientationChanged(orientation);
         }
         
@@ -754,6 +793,7 @@ private void storeImage(Bitmap image) {
             if (BluetoothLeService.ACTION_GATT_CONNECTED.equals(action)) {
                 mConnected = true;
                 __enableConnect(true);
+                __log("connected");
              //  updateConnectionState(R.string.connected);
              //   invalidateOptionsMenu();
             } else if (BluetoothLeService.ACTION_GATT_DISCONNECTED.equals(action)) {
@@ -764,8 +804,11 @@ private void storeImage(Bitmap image) {
             //    updateConnectionState(R.string.disconnected);
              //   invalidateOptionsMenu();
            //     clearUI();
+                if(mBluetoothLeService != null) mBluetoothLeService.disconnect();
+                __log("dis connect");
             } else if (BluetoothLeService.ACTION_GATT_SERVICES_DISCOVERED.equals(action)) {
                 if(mBluetoothLeService != null)
+                   
                     enableNotify(mBluetoothLeService.getSupportedGattService(UUID.fromString(SampleGattAttributes.UUID_SERVICE_HELLO)),
                         SampleGattAttributes.UUID_CHARACTERISTIC_HELLO_NOTIFY);
                 
@@ -776,9 +819,19 @@ private void storeImage(Bitmap image) {
         }
     };
     
+    
+    void __delay(long miniSec) {
+        try {
+            Thread.sleep(miniSec);//delay
+        } catch (InterruptedException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+    }
     void __takePicture (){
         if(!capture_in_progress) {
             mCamera.takePicture(null, null, mPicture);
+            shootSound();
             capture_in_progress = true;
         } else {
             Toast.makeText(MainActivity.this, "capture in progress", Toast.LENGTH_SHORT).show();
@@ -786,6 +839,7 @@ private void storeImage(Bitmap image) {
         }
     }
     boolean capture_in_progress =false;
+    
     @Override
     public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
         // TODO Auto-generated method stub
@@ -831,9 +885,12 @@ private void storeImage(Bitmap image) {
     //        new ArrayList<ArrayList<BluetoothGattCharacteristic>>();
     private boolean enableNotify(BluetoothGattService gattService, String uuid_char) {
         if (gattService == null) return false;
+        __delay(500);
         BluetoothGattCharacteristic gattCharNotify= gattService.getCharacteristic(UUID.fromString(uuid_char));
         if(gattCharNotify == null)return false;
+        __delay(500);
         mBluetoothLeService.setCharacteristicNotification(gattCharNotify, true);
+        __log("register for notify!!!");
         return true;
       /*  String uuid = null;
         String unknownServiceString = getResources().getString(R.string.unknown_service);
@@ -867,6 +924,21 @@ private void storeImage(Bitmap image) {
         });
        
     }
-   
+    
+    MediaPlayer _shootMP = null;
+    public void shootSound()
+    {
+        AudioManager meng = (AudioManager) this.getSystemService(Context.AUDIO_SERVICE);
+        int volume = meng.getStreamVolume( AudioManager.STREAM_NOTIFICATION);
+
+        if (volume != 0)
+        {
+           
+            if (_shootMP == null)
+                _shootMP = MediaPlayer.create(this, Uri.parse("file:///system/media/audio/ui/Shutter.ogg"));
+            if (_shootMP != null)
+                _shootMP.start();
+        }
+    }
 
 }
