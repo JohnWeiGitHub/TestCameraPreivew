@@ -80,18 +80,22 @@ import android.widget.ToggleButton;
 
 public class MainActivity extends Activity   implements Callback, PreviewCallback, OnClickListener, OnCheckedChangeListener{
     private Camera mCamera = null;
+    Bitmap background_image;
+    MediaPlayer _shootMP = null;//for shutter sound
+    private boolean enableFaceDetect = true;//enable the function of face detection
+    public boolean saveOrientationExif =false;//save the orientation in Exif, true will make frequently setParameter
     private static final String TAG = "testcamerapreivew ";
     private static final String FOLDER_NAME = TAG;///storage/emulated/legacy/Pictures/$FOLDER_NAME/
     private static final int CAMERA_NUM = 0;
     private static final int MAX_FACES = 10;
     private static final float FACE_RECT_RATIO = 1.5f;
     private static final int FACE_RECT_COLOR = Color.RED;
+    private static final long FACE_DETECT_INTERVAL = 333;//  1/30 for 30 fps
     private SurfaceHolder mHolder;
     private SurfaceView mSurfaceView;
-    //private byte[] rgbBuffer;
     private SurfaceView mFaceView;
     float faceConfidence=0.4f;//default faceDetector return face with confidence > 0.4f which was set in framework
-    int w =640;
+    int w =640;//preview size
     int h =480;
     float xScale =1f;
     float yScale =1f;
@@ -99,18 +103,24 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     private FaceDetector.Face[] faces; 
     private int face_count;
     boolean debug =true;
-    void __log(String str){
-        if(debug)Log.i(TAG, str);    
-    }
-    boolean swFd=false;
-    boolean hwFd=false;
+    boolean capture_in_progress =false;
+    boolean faceDetectInProgress = false;
+    
     int orientation =0;
-   // byte []buffer1 = null; 
-   // byte []buffer2 = null;
     byte []buffer3 = null;
     Button btnCapture;
     ToggleButton btnConnect;
     CameraInfo cameraInfo = null;
+    private Matrix mRotateMatrix = null;
+    private static final int[] sOrientDegrees = { 90, 180, 270 };
+    int count_capture=0;//for debug; save preview frame as a bmp
+    public static final int MEDIA_TYPE_IMAGE = 1;
+    public static final int MEDIA_TYPE_VIDEO = 2;
+    private MyOrientationEventListener mOrientationListener;
+    // The degrees of the device rotated clockwise from its natural orientation.
+    private int mLastScreenOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
+    private int mSensorOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
+    
     
     
     //BLE related field
@@ -120,12 +130,15 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     private static final int REQUEST_ENABLE_BT = 1;
     // Stops scanning after 10 seconds.
     private static final long SCAN_PERIOD = 10000;
-   // private ArrayList<BluetoothDevice> mLeDevices = new ArrayList<BluetoothDevice>();
     private BluetoothDevice mHelloSensor;
     private BluetoothLeService mBluetoothLeService;
     private boolean mConnected = false;
- 
     //
+
+    void __log(String str){
+        if(debug)Log.i(TAG, str); 
+    }
+    
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -155,17 +168,18 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         mHolder = mSurfaceView.getHolder();
         mHolder.addCallback(this);
                 
-       // mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
+        mHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         p = mCamera.getParameters();
         List<Size> sizes = p.getSupportedPreviewSizes();
         __log("supported resolution============");
+        //for debug; show all the supported preview size
+        /*
         for(Size size :sizes) {
             __log(size.width+"x"+size.height);         
-        }
-        //w=p.getPreferredPreviewSizeForVideo().width;
-        //h=p.getPreferredPreviewSizeForVideo().height;
+        }*/
+                
         p.setPreviewSize(w, h);
-       // if(p.getSupportedFocusModes().contains(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE))
+
         //p.setFocusMode(Parameters.FOCUS_MODE_CONTINUOUS_PICTURE); will invalid due to preview not started yet 
         orientation =cameraInfo.orientation;
         mCamera.setParameters(p);
@@ -174,14 +188,8 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         PixelFormat pf = new PixelFormat();
         PixelFormat.getPixelFormatInfo(p.getPreviewFormat(),pf);
         int bufSize = (w*h*pf.bitsPerPixel)/8;
-        __log("buffer============");
-        //把buffer給preview callback備用
         
-       //  buffer1 = new byte[bufSize];
-         //buffer2 = new byte[bufSize];
-        buffer3 = new byte[bufSize];
-        // rgbBuffer = new byte[w*h*2];
-        
+        buffer3 = new byte[bufSize];//buffer for preview call back
         
         mHandler = new Handler();
         enableBLE();
@@ -220,12 +228,9 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         if (!mScanning) {
             menu.findItem(R.id.menu_stop).setVisible(false);
             menu.findItem(R.id.menu_scan).setVisible(true);
-            //menu.findItem(R.id.menu_refresh).setActionView(null);
         } else {
             menu.findItem(R.id.menu_stop).setVisible(true);
             menu.findItem(R.id.menu_scan).setVisible(false);
-            //menu.findItem(R.id.menu_refresh).setActionView(
-                   // R.layout.actionbar_indeterminate_progress);
         }
         return true;
     }
@@ -234,7 +239,6 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.menu_scan:
-               // mLeDevices.clear();
                 mHelloSensor=null;
                 __enableConnect(false);
                 scanLeDevice(true);               
@@ -266,16 +270,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         }
     }
     
-     Bitmap getBitmapImageFromYUV(byte[] data, int width, int height) {
-        YuvImage yuvimage = new YuvImage(data, ImageFormat.NV21, width, height, null);
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        yuvimage.compressToJpeg(new Rect(0, 0, width, height), 80, baos);
-        byte[] jdata = baos.toByteArray();
-        BitmapFactory.Options bitmapFatoryOptions = new BitmapFactory.Options();
-        bitmapFatoryOptions.inPreferredConfig = Bitmap.Config.RGB_565;
-        Bitmap bmp = BitmapFactory.decodeByteArray(jdata, 0, jdata.length, bitmapFatoryOptions);
-        return bmp;
- }
+   
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
         // TODO Auto-generated method stub
@@ -304,12 +299,14 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
 
         // start preview with new settings
         try {
-           //mCamera.setPreviewCallbackWithBuffer(this); 
-        //    mCamera.setPreviewCallback(this);
-            mCamera.addCallbackBuffer(buffer3 );
-            mCamera.setPreviewCallbackWithBuffer(this);
+
+            if(enableFaceDetect) {
+                mCamera.addCallbackBuffer(buffer3 );
+                mCamera.setPreviewCallbackWithBuffer(this);
+                __log("setPreviewCallbackWithBuffer============");
+            }
             
-              __log("setPreviewCallbackWithBuffer============");
+            
             mCamera.setPreviewDisplay(holder);
             mCamera.setDisplayOrientation(orientation);
             mCamera.startPreview();
@@ -365,12 +362,9 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         public void onLeScan(final BluetoothDevice device, int rssi, byte[] scanRecord) {
             __log("device name=" + device.getName());
             if (device.getName().equals("Hello Sensor")) {
-                // device.fetchUuidsWithSdp();
-                mHelloSensor = device;             
-                        __enableConnect(true);
-                        scanLeDevice(false);
-                
-
+                mHelloSensor = device;
+                __enableConnect(true);
+                scanLeDevice(false);//get the desired device; stop redundant scan
             }
         }
     };
@@ -380,16 +374,14 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         // TODO Auto-generated method stub
         super.onPause();
         mOrientationListener.disable();
+        if(enableFaceDetect)
+            mCamera.setPreviewCallbackWithBuffer(null);
         mCamera.stopPreview();
-        mCamera.setPreviewCallbackWithBuffer(null);
-        mCamera.setPreviewCallback(null);
         mCamera.release();
         mCamera = null;
         
         scanLeDevice(false);
-       // mLeDevices.clear();
-        mHelloSensor =null;
-        
+        mHelloSensor =null;        
         unregisterReceiver(mGattUpdateReceiver);
         
     }
@@ -403,12 +395,7 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             mCamera = this.getCameraInstance();
             __log("onResume = null");
             startPreview(mHolder);
-        }
-        //mCamera.addCallbackBuffer(buffer1 );
-        //mCamera.addCallbackBuffer(buffer2 ); 
-        //mCamera.addCallbackBuffer(buffer3 );
-
-       //mCamera.setPreviewCallback(this);
+        }       
         
         
         // Ensures Bluetooth is enabled on the device.  If Bluetooth is not currently enabled,
@@ -420,8 +407,6 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
             }
         }
 
-        // Initializes list mLeDevices.
-      //  mLeDevices.clear();
         mHelloSensor =null;
         __enableConnect(false);
         scanLeDevice(true);
@@ -439,176 +424,73 @@ public class MainActivity extends Activity   implements Callback, PreviewCallbac
         super.onActivityResult(requestCode, resultCode, data);
     }
     
-    private MyOrientationEventListener mOrientationListener;
-    // The degrees of the device rotated clockwise from its natural orientation.
-    private int mLastScreenOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
-    private int mSensorOrientation = OrientationEventListener.ORIENTATION_UNKNOWN;
-    
-    boolean faceDetectInProgress = false;
-
-    class FaceDectecorAsyncTask extends AsyncTask<String, Integer, Integer>{
-
-        @Override
-        protected Integer doInBackground(String... param) {
-            
-            
-            if(mRotateMatrix!=null)
-                background_image = Bitmap.createBitmap(background_image, 0, 0, w, h, mRotateMatrix, true);
-            
-            FaceDetector face_detector = new FaceDetector( 
-            background_image.getWidth(), background_image.getHeight(), 
-            MAX_FACES); 
-
-            faces = new FaceDetector.Face[MAX_FACES]; 
-            // The bitmap must be in 565 format (for now). 
-            face_count = face_detector.findFaces(background_image, faces); 
-           // if(face_count>0)   __log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection Count: " + String.valueOf(face_count)); 
-           
-            if(count_capture>0) {
-                MainActivity.this.storeImage(background_image);
-                count_capture=0;
-            }
-            background_image.recycle();
-            background_image = null;
-            
-            
-                final Surface surface = mFaceView.getHolder().getSurface();
-                if(surface == null|| !surface.isValid())  Log.e(TAG, "surface is null or not valid");
-                Canvas canvas = surface.lockCanvas(null);
-                if (canvas == null) {
-                    Log.e(TAG, "Cannot draw onto the canvas as it's null");
-                } else {
-                    canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-                    if(face_count>0) drawFaceRetangle(canvas,faces,face_count);
-                    surface.unlockCanvasAndPost(canvas);
-                }
-            
-                try {
-                    Thread.sleep(333);//30 fps
-                } catch (InterruptedException e) {
-                    // TODO Auto-generated catch block
-                    e.printStackTrace();
-                }
-          
-            return null;
-        }
-
-        @Override
-        protected void onPostExecute(Integer result) {
-            faceDetectInProgress = false;
-            super.onPostExecute(result);
-            
-        }
-
-        @Override
-        protected void onProgressUpdate(Integer... values) {
-            super.onProgressUpdate(values);
-        }
-
-        @Override
-        protected void onPreExecute() {
-            faceDetectInProgress = true;
-            super.onPreExecute();
-        }
-
-    }
     
     
-    Bitmap background_image;
+    
+    
     @Override
     public void onPreviewFrame(byte[] data, Camera camera) {
         // TODO Auto-generated method stub
         //__log("onPreviewFrame enter");
         
         
-        if(faceDetectInProgress == false) {
-        
+        if(!faceDetectInProgress) {        
             background_image = getBitmapImageFromYUV(data, w, h);
             new FaceDectecorAsyncTask().execute( new String());
         }
-        
-        
 
-        
-        //camera.addCallbackBuffer(data);
-        
+        if(enableFaceDetect)
+            camera.addCallbackBuffer(data);
+       
        // __log("onPreviewFrame exit");
     }   
 
-private void storeImage(Bitmap image) {
-    File pictureFile = getOutputMediaFile();
-    if (pictureFile == null) {
-        Log.d(TAG,
-                "Error creating media file, check storage permissions: ");// e.getMessage());
-        return;
-    } 
-    try {
-        FileOutputStream fos = new FileOutputStream(pictureFile);
-        image.compress(Bitmap.CompressFormat.PNG, 90, fos);
-        fos.close();
-    } catch (FileNotFoundException e) {
-        Log.d(TAG, "File not found: " + e.getMessage());
-    } catch (IOException e) {
-        Log.d(TAG, "Error accessing file: " + e.getMessage());
-    }  
-}
+
 
     private void drawFaceRetangle(Canvas canvas, android.media.FaceDetector.Face[] faces, int face_count) {
 
-      
-        xScale =mFaceView.getWidth();       
-        yScale =mFaceView.getHeight();
-        
-        if(cameraInfo.orientation%180==90){
-            xScale /=h;
-            yScale /=w;
+        xScale = mFaceView.getWidth();
+        yScale = mFaceView.getHeight();
+        // the preivew are actually scaled after layout, we should take it into account when draw rect on face
+        if (cameraInfo.orientation % 180 == 90) {
+            xScale /= h;
+            yScale /= w;
         } else {
-            xScale /=w;
-            yScale /=h;
+            xScale /= w;
+            yScale /= h;
         }
-        
+
         Paint tmp_paint = new Paint();
-         PointF tmp_point = new PointF();
-         RectF r= new RectF();
-         FaceDetector.Face face;
-         float eyeDis=0f;
-         //face.eyesDistance();
-        for (int i = 0; i < face_count; i++) { 
-             face = faces[i];              
-            if(faceConfidence>face.confidence())return;
-            eyeDis=face.eyesDistance()*FACE_RECT_RATIO;
-            tmp_paint.setColor(FACE_RECT_COLOR); 
-            tmp_paint.setAlpha(50); 
+        PointF tmp_point = new PointF();
+        RectF r = new RectF();
+        FaceDetector.Face face;
+        float eyeDis = 0f;
+
+        for (int i = 0; i < face_count; i++) {// draw the face rect according orientation
+            face = faces[i];
+            if (faceConfidence > face.confidence())
+                return;
+            eyeDis = face.eyesDistance() * FACE_RECT_RATIO;
+            tmp_paint.setColor(FACE_RECT_COLOR);
+            tmp_paint.setAlpha(50);
             face.getMidPoint(tmp_point);
-            if(mSensorOrientation == 90) {
-            r.set( new RectF(xScale*(tmp_point.x-eyeDis),
-                    yScale*(tmp_point.y-eyeDis),
-                    xScale*(tmp_point.x+eyeDis),
-                    yScale*(tmp_point.y+eyeDis)));
-            } else if(mSensorOrientation == 180) {
-                r.set( new RectF((tmp_point.y-eyeDis)*xScale,
-                        mFaceView.getHeight()-(tmp_point.x+eyeDis)*yScale,
-                        (tmp_point.y+eyeDis)*xScale,
-                        mFaceView.getHeight()-(tmp_point.x-eyeDis)*yScale));
-            } else if(mSensorOrientation == 270) {
-                r.set( new RectF(mFaceView.getWidth()-(tmp_point.x+eyeDis)*xScale,
-                        mFaceView.getHeight()-(tmp_point.y+eyeDis)*yScale,
-                        mFaceView.getWidth()-(tmp_point.x-eyeDis)*xScale,
-                        mFaceView.getHeight()-(tmp_point.y-eyeDis)*yScale));
-            }  else {
-                r.set( new RectF(mFaceView.getWidth()-(tmp_point.y+eyeDis)*xScale,
-                        (tmp_point.x-eyeDis)*yScale,
-                        mFaceView.getWidth()-(tmp_point.y-eyeDis)*xScale,
-                        (tmp_point.x+eyeDis)*yScale
-                        ));
+            if (mSensorOrientation == 90) {
+                r.set(new RectF(xScale * (tmp_point.x - eyeDis),
+                        yScale * (tmp_point.y - eyeDis), xScale * (tmp_point.x + eyeDis), yScale * (tmp_point.y + eyeDis)));
+            } else if (mSensorOrientation == 180) {
+                r.set(new RectF((tmp_point.y - eyeDis) * xScale, mFaceView.getHeight() - (tmp_point.x + eyeDis) * yScale,
+                        (tmp_point.y + eyeDis) * xScale, mFaceView.getHeight() - (tmp_point.x - eyeDis) * yScale));
+            } else if (mSensorOrientation == 270) {
+                r.set(new RectF(mFaceView.getWidth() - (tmp_point.x + eyeDis) * xScale, mFaceView.getHeight() - (tmp_point.y + eyeDis) * yScale,
+                        mFaceView.getWidth() - (tmp_point.x - eyeDis) * xScale, mFaceView.getHeight() - (tmp_point.y - eyeDis) * yScale));
+            } else {
+                r.set(new RectF(mFaceView.getWidth() - (tmp_point.y + eyeDis) * xScale,
+                        (tmp_point.x - eyeDis) * yScale, mFaceView.getWidth() - (tmp_point.y - eyeDis) * xScale, (tmp_point.x + eyeDis) * yScale));
             }
-            
-           // canvas.drawCircle(tmp_point.x, tmp_point.y, face.eyesDistance(),  tmp_paint); 
-            
-           
+
             canvas.drawRect(r, tmp_paint);
-           
-            } 
+
+        }
         // TODO Auto-generated method stub
      
     }
@@ -638,54 +520,11 @@ private void storeImage(Bitmap image) {
         return mediaFile;
     } 
 
-    
-    private class MyOrientationEventListener
-    extends OrientationEventListener {
-        public MyOrientationEventListener(Context context) {
-            super(context);
-        }
-
-    
-    @Override
-    
-    public void onOrientationChanged(int orientation) {
-        // We keep the last known orientation. So if the user first orient
-        // the camera then point the camera to floor or sky, we still have
-        // the correct orientation.
-        if (orientation == ORIENTATION_UNKNOWN) return;
-        mLastScreenOrientation=0;
-        for (int i : sOrientDegrees) {
-            if (i - 45 <orientation && orientation <= i + 45) {
-                if(mLastScreenOrientation == i) return;
-                else mLastScreenOrientation = i;
-                break;
-            }
-        }
-        
-       // mLastRawOrientation = orientation;
-        if(mRotateMatrix == null) mRotateMatrix= new Matrix();
-        mSensorOrientation = mLastScreenOrientation+cameraInfo.orientation;
-        mRotateMatrix.setRotate(mSensorOrientation==360 ?0 :mSensorOrientation);
-        
-        p.setRotation(mSensorOrientation==360 ?0 :mSensorOrientation);
-        //mCamera.setParameters(p);
-        //mCurrentModule.onOrientationChanged(orientation);
-        }
-        
-    }
-    private Matrix mRotateMatrix = null;
-    private static final int[] sOrientDegrees = { 90, 180, 270 };
-    int count_capture=0;//for save preview frame as a bmp
     @Override
     public void onClick(View v) {
-        // TODO Auto-generated method stub
         //count_capture=1;
         __takePicture();
     }
-    
-    
-    public static final int MEDIA_TYPE_IMAGE = 1;
-    public static final int MEDIA_TYPE_VIDEO = 2;
 
     /** Create a file Uri for saving an image or video */
     private static Uri getOutputMediaFileUri(int type){
@@ -768,7 +607,6 @@ private void storeImage(Bitmap image) {
                 finish();
             }
             // Automatically connects to the device upon successful start-up initialization.
-            //registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
             if(mHelloSensor!= null) {
                 mBluetoothLeService.connect(mHelloSensor.getAddress());
                 __enableConnect(false);
@@ -780,7 +618,7 @@ private void storeImage(Bitmap image) {
             mBluetoothLeService = null;            
         }
     };
- // Handles various events fired by the Service.
+    // Handles various events fired by the Service.
     // ACTION_GATT_CONNECTED: connected to a GATT server.
     // ACTION_GATT_DISCONNECTED: disconnected from a GATT server.
     // ACTION_GATT_SERVICES_DISCOVERED: discovered GATT services.
@@ -794,16 +632,13 @@ private void storeImage(Bitmap image) {
                 mConnected = true;
                 __enableConnect(true);
                 __log("connected");
-             //  updateConnectionState(R.string.connected);
-             //   invalidateOptionsMenu();
+
             } else if (BluetoothLeService.ACTION_GATT_DISCONNECTED.equals(action)) {
                mConnected = false;
               
                __checkConnect(false);
                 __enableConnect(false);//user need to rescan
-            //    updateConnectionState(R.string.disconnected);
-             //   invalidateOptionsMenu();
-           //     clearUI();
+
                 if(mBluetoothLeService != null) mBluetoothLeService.disconnect();
                 __log("dis connect");
             } else if (BluetoothLeService.ACTION_GATT_SERVICES_DISCOVERED.equals(action)) {
@@ -813,8 +648,7 @@ private void storeImage(Bitmap image) {
                         SampleGattAttributes.UUID_CHARACTERISTIC_HELLO_NOTIFY);
                 
             } else if (BluetoothLeService.ACTION_DATA_AVAILABLE.equals(action)) {
-            //    displayData(intent.getStringExtra(BluetoothLeService.EXTRA_DATA));
-                __takePicture ();                
+                __takePicture ();//get a remote notify of click                
             }
         }
     };
@@ -838,7 +672,7 @@ private void storeImage(Bitmap image) {
             __log("previous capture in progress");
         }
     }
-    boolean capture_in_progress =false;
+    
     
     @Override
     public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
@@ -855,9 +689,7 @@ private void storeImage(Bitmap image) {
         } else {
             if(mBluetoothLeService!=null)
                 mBluetoothLeService.disconnect();
-            __enableConnect(false);
-            //unbindService(mServiceConnection);
-            //mBluetoothLeService = null;            
+            __enableConnect(false);    
         }
         
     }
@@ -880,29 +712,17 @@ private void storeImage(Bitmap image) {
         return intentFilter;
     }
     
-  
-    //private ArrayList<ArrayList<BluetoothGattCharacteristic>> mGattCharacteristics = null;
-    //        new ArrayList<ArrayList<BluetoothGattCharacteristic>>();
+
     private boolean enableNotify(BluetoothGattService gattService, String uuid_char) {
         if (gattService == null) return false;
         __delay(500);
-        BluetoothGattCharacteristic gattCharNotify= gattService.getCharacteristic(UUID.fromString(uuid_char));
-        if(gattCharNotify == null)return false;
+        BluetoothGattCharacteristic gattCharNotify = gattService.getCharacteristic(UUID.fromString(uuid_char));
+        if (gattCharNotify == null) return false;
         __delay(500);
         mBluetoothLeService.setCharacteristicNotification(gattCharNotify, true);
         __log("register for notify!!!");
         return true;
-      /*  String uuid = null;
-        String unknownServiceString = getResources().getString(R.string.unknown_service);
-        String unknownCharaString = getResources().getString(R.string.unknown_characteristic);
-        
-      //  ArrayList<HashMap<String, String>> gattServiceData = new ArrayList<HashMap<String, String>>();
-       // ArrayList<ArrayList<HashMap<String, String>>> gattCharacteristicData
-         //       = new ArrayList<ArrayList<HashMap<String, String>>>();
-        //mGattCharacteristics = new ArrayList<ArrayList<BluetoothGattCharacteristic>>();*/
-
-        // Loops through available GATT Services.
-        
+             
        
     }
     void __enableConnect(final boolean enabled) {
@@ -923,9 +743,8 @@ private void storeImage(Bitmap image) {
             }
         });
        
-    }
-    
-    MediaPlayer _shootMP = null;
+    }    
+   
     public void shootSound()
     {
         AudioManager meng = (AudioManager) this.getSystemService(Context.AUDIO_SERVICE);
@@ -939,6 +758,140 @@ private void storeImage(Bitmap image) {
             if (_shootMP != null)
                 _shootMP.start();
         }
+    }
+
+    Bitmap getBitmapImageFromYUV(byte[] data, int width, int height) {
+        YuvImage yuvimage = new YuvImage(data, ImageFormat.NV21, width, height, null);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        yuvimage.compressToJpeg(new Rect(0, 0, width, height), 80, baos);
+        byte[] jdata = baos.toByteArray();
+        BitmapFactory.Options bitmapFatoryOptions = new BitmapFactory.Options();
+        bitmapFatoryOptions.inPreferredConfig = Bitmap.Config.RGB_565;
+        Bitmap bmp = BitmapFactory.decodeByteArray(jdata, 0, jdata.length, bitmapFatoryOptions);
+        return bmp;
+    }
+    private void storeImage(Bitmap image) {
+        File pictureFile = getOutputMediaFile();
+        if (pictureFile == null) {
+            Log.d(TAG,
+                    "Error creating media file, check storage permissions: ");// e.getMessage());
+            return;
+        } 
+        try {
+            FileOutputStream fos = new FileOutputStream(pictureFile);
+            image.compress(Bitmap.CompressFormat.PNG, 90, fos);
+            fos.close();
+        } catch (FileNotFoundException e) {
+            Log.d(TAG, "File not found: " + e.getMessage());
+        } catch (IOException e) {
+            Log.d(TAG, "Error accessing file: " + e.getMessage());
+        }  
+    }
+    private class MyOrientationEventListener
+    extends OrientationEventListener {
+        public MyOrientationEventListener(Context context) {
+            super(context);
+        }
+    
+        @Override
+        public void onOrientationChanged(int orientation) {
+            // We keep the last known orientation. So if the user first orient
+            // the camera then point the camera to floor or sky, we still have
+            // the correct orientation.
+            if (orientation == ORIENTATION_UNKNOWN)
+                return;
+            mLastScreenOrientation = 0;
+            for (int i : sOrientDegrees) {
+                if (i - 45 < orientation && orientation <= i + 45) {
+                    if (mLastScreenOrientation == i)
+                        return;
+                    else
+                        mLastScreenOrientation = i;
+                    break;
+                }
+            }
+
+            if (mRotateMatrix == null)
+                mRotateMatrix = new Matrix();
+            mSensorOrientation = mLastScreenOrientation + cameraInfo.orientation;
+            mRotateMatrix.setRotate(mSensorOrientation == 360 ? 0 : mSensorOrientation);
+
+            p.setRotation(mSensorOrientation == 360 ? 0 : mSensorOrientation);
+            if (saveOrientationExif)
+                mCamera.setParameters(p);
+        }
+    }
+    
+    /*task for face detect*/
+    class FaceDectecorAsyncTask extends AsyncTask<String, Integer, Integer>{
+
+
+
+        @Override
+        protected Integer doInBackground(String... param) {
+            
+            
+            if(mRotateMatrix!=null)
+                background_image = Bitmap.createBitmap(background_image, 0, 0, w, h, mRotateMatrix, true);
+            
+            FaceDetector face_detector = new FaceDetector( 
+            background_image.getWidth(), background_image.getHeight(), 
+            MAX_FACES); 
+
+            faces = new FaceDetector.Face[MAX_FACES]; 
+            // The bitmap must be in 565 format (for now). 
+            face_count = face_detector.findFaces(background_image, faces); 
+           // if(face_count>0)   __log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>Face_Detection Count: " + String.valueOf(face_count)); 
+           
+            if(count_capture>0) {
+                MainActivity.this.storeImage(background_image);
+                count_capture=0;
+            }
+            background_image.recycle();
+            background_image = null;
+            
+            
+            final Surface surface = mFaceView.getHolder().getSurface();
+            if (surface == null || !surface.isValid())
+                Log.e(TAG, "surface is null or not valid");
+            Canvas canvas = surface.lockCanvas(null);
+            if (canvas == null) {
+                Log.e(TAG, "Cannot draw onto the canvas as it's null");
+            } else {
+                canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+                if (face_count > 0)
+                    drawFaceRetangle(canvas, faces, face_count);
+                surface.unlockCanvasAndPost(canvas);
+            }
+
+            try {
+                Thread.sleep(FACE_DETECT_INTERVAL);// 30 fps
+            } catch (InterruptedException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+          
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(Integer result) {
+            faceDetectInProgress = false;
+            super.onPostExecute(result);
+            
+        }
+
+        @Override
+        protected void onProgressUpdate(Integer... values) {
+            super.onProgressUpdate(values);
+        }
+
+        @Override
+        protected void onPreExecute() {
+            faceDetectInProgress = true;
+            super.onPreExecute();
+        }
+
     }
 
 }
